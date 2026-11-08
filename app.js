@@ -1,7 +1,7 @@
-/* Family Money — app (works offline, syncs to your Google Sheet) */
+/* Family Finance — app (works offline, syncs to your Google Sheet) */
 'use strict';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 const IS_GAS = !!(window.google && google.script && google.script.run);
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -201,7 +201,29 @@ function call(body) {
   if (!cfg.api) return Promise.reject(new Error('No server address'));
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 45000);
   return fetch(cfg.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), signal: ctl.signal, redirect: 'follow' })
-    .then(r => r.json()).finally(() => clearTimeout(tm));
+    .then(r => r.text()).then(t => parseServer(t)).finally(() => clearTimeout(tm));
+}
+/* Explain clearly when the server answers with a web page instead of data */
+function parseServer(text) {
+  try { return JSON.parse(text); } catch (e) {}
+  const t = String(text).toLowerCase();
+  let msg;
+  if (t.includes('script function not found') || t.includes('dopost')) msg = 'The web app was deployed before the code was added. In Apps Script: Deploy ▸ Manage deployments ▸ ✏ Edit ▸ Version: New version ▸ Deploy.';
+  else if (t.includes('accounts.google') || t.includes('sign in') || t.includes('signin') || t.includes('servicelogin')) msg = 'Google asked for a sign-in. In Apps Script: Deploy ▸ Manage deployments ▸ ✏ Edit, set "Who has access" to Anyone, then Deploy.';
+  else if (t.includes('page not found') || t.includes('404')) msg = 'That server address was not found. Copy the Web app URL again (Deploy ▸ Manage deployments) — it ends in /exec.';
+  else msg = 'The server address is not your Apps Script web app. It must look like https://script.google.com/macros/s/…/exec';
+  const err = new Error(msg); err.code = 'NOT_JSON'; throw err;
+}
+function checkApiUrl(u) {
+  u = String(u || '').trim();
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(u)) return ''; // local testing
+  if (!/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+|macros)\/s\/[\w-]+\/exec\/?$/.test(u.split('?')[0])) {
+    if (/\/dev\/?$/.test(u)) return 'This is the test (/dev) link. Use the Web app URL that ends in /exec.';
+    if (/script\.google\.com\/.*\/edit/.test(u)) return 'This is the editor link. Use the Web app URL from Deploy ▸ Manage deployments (it ends in /exec).';
+    if (/github\.io/.test(u)) return 'This is the GitHub address of the app. Here you need the Apps Script Web app URL (it ends in /exec).';
+    return 'The server address must look like https://script.google.com/macros/s/…/exec';
+  }
+  return '';
 }
 const authBody = () => ({ deviceId: cfg.deviceId, deviceKey: cfg.deviceKey, userId: me && me.userId });
 
@@ -323,7 +345,7 @@ function render() {
   if (!me) { app.innerHTML = loginView(); return; }
   const first = (user(me.userId).Name || '').split(' ')[0];
   const title = ui.view === 'home' ? first : viewTitle();
-  const kicker = ui.view === 'home' ? greeting() : (db.settings.HouseholdName || 'Family Money');
+  const kicker = ui.view === 'home' ? greeting() : (db.settings.HouseholdName || 'Family Finance');
   app.innerHTML = `
     <header class="top"><div class="top-row">
       <button class="me-chip" data-act="switchUser" title="Lock or switch person">${whoDot(me.userId, true)}</button>
@@ -370,14 +392,14 @@ function paintBadge() {
 
 /* ───────────── Connect & login ───────────── */
 function connectView() {
-  return `<div class="auth"><div class="logo">$</div><h1>Family Money</h1><p class="lead">Connect this phone or laptop to your household.</p>
+  return `<div class="auth"><div class="logo">$</div><h1>Family Finance</h1><p class="lead">Connect this phone or laptop to your household.</p>
   <form data-form="connect" class="card">
     ${IS_GAS ? '' : `<label class="f"><span>Server address (your Apps Script web app URL)</span><input class="in" name="api" value="${esc(cfg.api || '')}" placeholder="https://script.google.com/macros/s/…/exec" required></label>`}
     <label class="f"><span>Household code</span><input class="in" name="code" placeholder="ABCD-1234" autocapitalize="characters" autocomplete="off" required></label>
     <label class="f"><span>Name for this device</span><input class="in" name="dev" placeholder="e.g. Ephraim's phone" required></label>
     <div class="err" id="cErr"></div>
     <button class="btn block" style="margin-top:12px">Connect</button>
-    <p class="tiny muted" style="margin-top:12px">The household code is in the Google Sheet: menu <b>Family Money ▸ Show household code</b>.</p>
+    <p class="tiny muted" style="margin-top:12px">The household code is in the Google Sheet: menu <b>Family Finance ▸ Show household code</b>.</p>
   </form></div>`;
 }
 
@@ -408,7 +430,7 @@ function loginView() {
     <div class="err" id="lErr"></div><button class="btn block" style="margin-top:12px">Unlock</button>
     <button type="button" class="btn ghost block" style="margin-top:8px" data-act="loginBack">Not ${esc(u.Name)}?</button></form></div>`;
   }
-  return `<div class="auth"><div class="logo">$</div><h1>${esc(db.settings.HouseholdName || 'Family Money')}</h1><p class="lead">Who is using the app?</p>
+  return `<div class="auth"><div class="logo">$</div><h1>${esc(db.settings.HouseholdName || 'Family Finance')}</h1><p class="lead">Who is using the app?</p>
   <div class="people">${users.map(u => `<button class="person" data-act="pickUser" data-id="${esc(u.UserID)}"><span class="who" style="background:${esc(u.Color)}">${esc(u.Name[0].toUpperCase())}</span><br>${esc(u.Name)}</button>`).join('')}
   ${users.length < max ? `<button class="person" data-act="newPerson"><span class="who" style="background:var(--ink-3)">+</span><br>I'm new</button>` : ''}</div>
   <p class="center tiny muted" style="margin-top:20px">${net.syncing ? 'Syncing…' : `<button class="link" data-act="syncNow">Refresh list</button>`}</p></div>`;
@@ -723,7 +745,7 @@ function moreView() {
     ${it('sync', '🔄', 'Sync', queue.length ? queue.length + ' waiting' : 'Up to date' + (db.lastSync ? ' · ' + ago(new Date(db.lastSync).toISOString()) : ''))}
   </div></section>
   <section class="card"><button class="btn ghost block" data-act="switchUser">🔒 Lock / switch person</button>
-  <p class="tiny muted center" style="margin:10px 0 0">Family Money ${APP_VERSION} · ${IS_GAS ? 'Google web app' : 'installed app'}</p></section>`;
+  <p class="tiny muted center" style="margin:10px 0 0">Family Finance ${APP_VERSION} · ${IS_GAS ? 'Google web app' : 'installed app'}</p></section>`;
 }
 function subTitle(s) { return { appearance: 'Appearance', activity: 'Activity', wallets: 'Wallets', categories: 'Categories', rates: 'Currencies & rates', household: 'Household', pin: 'My PIN', sync: 'Sync' }[s] || ''; }
 function subView(s) {
@@ -1054,7 +1076,11 @@ document.addEventListener('submit', async e => {
 
   if (kind === 'connect') {
     busy(true); $('#cErr').textContent = '';
-    if (!IS_GAS) cfg.api = v.api.trim();
+    if (!IS_GAS) {
+      const bad = checkApiUrl(v.api);
+      if (bad) { $('#cErr').textContent = bad; busy(false); return; }
+      cfg.api = v.api.trim().split('?')[0];
+    }
     try {
       const r = await call({ action: 'registerDevice', householdCode: v.code, deviceName: v.dev });
       if (!r.ok) throw new Error(r.message);

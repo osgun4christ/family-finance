@@ -1,6 +1,6 @@
 {
-  "name": "Family Money",
-  "short_name": "Money",
+  "name": "Family Finance",
+  "short_name": "Family Finance",
   "description": "Shared household expenses and budget in two currencies",
   "start_url": "./",
   "scope": "./",
